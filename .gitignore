@@ -1,3 +1,4 @@
 .env
 nmap_report.xml
 summary.md
+ui/target

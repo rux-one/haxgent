@@ -2,7 +2,7 @@ import { BaseChatMessage } from "./base-chat-service.ts";
 import { IChatService } from "./chat-service.interface.ts";
 import { RoleDto } from "./chat.dto.ts";
 
-export const OPENAI_DEFAULT_MODEL = "gpt-3.5-turbo";
+export const OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
 
 export class OpenAiChatService extends BaseChatMessage implements IChatService {
   constructor(private apiKey: string, protected model: string = OPENAI_DEFAULT_MODEL, private baseUrl: string = "https://api.openai.com/v1") {
