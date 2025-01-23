@@ -53,10 +53,62 @@ impl Agent {
     }
 }
 
-static mut current_command: String = String::new();
-static mut current_command_args: Vec<String> = vec![];
+struct Commands {
+    commands: HashMap<String, String>,
+    current_command: String,
+    current_command_args: Vec<String>,
+}
+
+impl Commands {
+    fn new() -> Self {
+        Self {
+            commands: HashMap::new(),
+            current_command: String::new(),
+            current_command_args: vec![],
+        }
+    }
+
+    fn add_command(&mut self, command: String, description: String) {
+        self.commands.insert(command, description);
+    }
+
+    fn setup_commands(&self) -> HashMap<String, String> {
+        let mut commands = HashMap::new();
+        commands.insert("sethost".to_string(), "Set host".to_string());
+        commands.insert("help".to_string(), "Available commands: hello, quit, sethost".to_string());
+        commands.insert("quit".to_string(), "Goodbye!".to_string());
+        commands
+    }
+
+    fn capture_command(&mut self, input: &str) {
+        if input.is_empty() {
+            return;
+        }
+
+        let cmd = input.split(" ").collect::<Vec<&str>>()[0];
+        let args = input.split(" ").collect::<Vec<&str>>()[1..].join(" ");
+
+        self.current_command = String::from(cmd);
+        self.current_command_args = args.split(" ").map(|s| s.to_string()).collect();
+    }
+
+    fn get_current_command(&self) -> &String {
+        &self.current_command
+    }
+
+    fn get_current_command_args(&self) -> &Vec<String> {
+        &self.current_command_args
+    }
+
+    fn reset_command(&mut self) {
+        self.current_command = String::new();
+        self.current_command_args = vec![];
+    }
+}
+
 
 fn main() -> Result<(), io::Error> {
+    let mut commands = Commands::new();
     let mut agent = Agent::new();
 
     // Setup terminal
@@ -69,7 +121,6 @@ fn main() -> Result<(), io::Error> {
     terminal.clear()?;
     
     let mut input = String::new();
-    let commands = setup_commands();
 
     loop {
         terminal.draw(|f| {
@@ -79,7 +130,7 @@ fn main() -> Result<(), io::Error> {
                 .split(size);
 
             // Display command output
-            capture_command(&input, &commands);
+            commands.capture_command(&input);
             let output_widget = Paragraph::new("Foo")
                 .block(Block::default().borders(Borders::ALL).title("Output"));
             f.render_widget(output_widget, chunks[0]);
@@ -101,12 +152,10 @@ fn main() -> Result<(), io::Error> {
                     crossterm::event::KeyCode::Enter => {
                         // Execute command on Enter key
 
-                        unsafe {
-                            match current_command.as_str() {
-                                "sethost" => agent.set_host(current_command_args[0].clone()),
-                                "exit" => break,
-                                _ => {}
-                            }
+                        match commands.get_current_command().as_str() {
+                            "sethost" => agent.set_host(commands.get_current_command_args()[0].clone()),
+                            "exit" => break,
+                            _ => {}
                         }
 
                         input.clear();  // Cleaesponser input after execution
@@ -133,26 +182,4 @@ fn main() -> Result<(), io::Error> {
     )?;
     terminal.show_cursor()?;
     Ok(())
-}
-
-fn setup_commands() -> HashMap<String, String> {
-    let mut commands = HashMap::new();
-    commands.insert("sethost".to_string(), "Set host".to_string());
-    commands.insert("help".to_string(), "Available commands: hello, quit, sethost".to_string());
-    commands.insert("quit".to_string(), "Goodbye!".to_string());
-    commands
-}
-
-fn capture_command(input: &str, commands: &HashMap<String, String>) {
-    if input.is_empty() {
-        return;
-    }
-
-    let cmd = input.split(" ").collect::<Vec<&str>>()[0];
-    let args = input.split(" ").collect::<Vec<&str>>()[1..].join(" ");
-
-    unsafe {
-        current_command = String::from(cmd);
-        current_command_args = args.split(" ").map(|s| s.to_string()).collect();
-    }
 }
