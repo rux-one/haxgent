@@ -3,7 +3,15 @@
 Playing around with agentic approach to very basic reconnaissance tasks.
 Generated report in MD format can be previewed using e.g. glow (`glow summary.md`)
 
-![v0.0.1 screenshot](./assets/v0.0.1_screenshot.png)
+![v0.3.1 screenshot](./assets/v0.3.1_screenshot.png)
+
+### Commands
+
+- `sethost <host>` - set host to scan
+- `poke` - run scan (automatically poked when setting host)
+- `quit` - exit (also Esc)
+
+The log can be browsed using the arrow keys. Commands can be entered directly in the input field on the top.
 
 ### Development
 
@@ -12,7 +20,7 @@ Current requirements:
 - OpenAI key
 - nmap-formatter binary 
 
-I am using a NixOS shell (with Deno installed) but the packages are available on any system probably.
+I am using a NixOS shell (with Rust pre-installed) but the packages are available on any system probably.
 
 `nix-shell -p rustscan nmap-formatter glow pkg-config openssl`
 
