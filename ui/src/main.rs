@@ -1,4 +1,5 @@
 mod logger;
+mod tools;
 
 use ratatui::{
     backend::CrosstermBackend,
@@ -17,17 +18,18 @@ use chrono::{DateTime, Utc, TimeZone};
 use crossbeam_channel::{unbounded, Sender, Receiver};
 
 use crate::logger::Logger;
+use crate::tools::{Tool, SystemCommandTool, ChatTool, ToolResult};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum AgentMessage {
     Poke,
     SetHost(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum AgentState {
     Idle,
-    Thinking,
+    Scanning,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +42,8 @@ struct Agent {
     config: AgentConfig,
     state: AgentState,
     log_sender: Sender<(String, String)>,
+    scan_tool: SystemCommandTool,
+    chat_tool: ChatTool,
 }
 
 impl Agent {
@@ -50,6 +54,15 @@ impl Agent {
             },
             state: AgentState::Idle,
             log_sender,
+            scan_tool: SystemCommandTool::new(
+                "Rustscan".to_string(),
+                "Network scanning tool".to_string(),
+                "rustscan".to_string(),
+            ),
+            chat_tool: ChatTool::new(
+                "ChatGPT".to_string(),
+                "AI assistant for analyzing scan results".to_string(),
+            ),
         }
     }
 
@@ -70,11 +83,83 @@ impl Agent {
     }
 
     fn poke(&mut self) {
-        self.set_state(AgentState::Thinking);
+        if self.state == AgentState::Scanning {
+            return;
+        }
+
+        self.set_state(AgentState::Scanning);
         self.log_sender.send((
-            String::from("Agent Status"),
-            String::from("Agent is thinking..."),
+            String::from("Starting scan... ⏳"),
+            format!("Scanning host {} with rustscan", self.config.host)
         )).unwrap();
+
+        // Run nmap scan
+        let args = vec![
+            "-a".to_string(),
+            self.config.host.clone(),
+            "-r".to_string(),
+            "0-10000".to_string(),
+            "--".to_string(),
+            "-sVCT".to_string(),
+            "-oX".to_string(),
+            "nmap_report.xml".to_string(),
+        ];
+
+        match self.scan_tool.run(args) {
+            Ok(ToolResult::Success(_)) => {
+                self.log_sender.send((
+                    String::from("Scan completed successfully ☑️"),
+                    "Scan results are saved to `nmap_report.xml`".to_string(),
+                )).unwrap();
+                
+                // Ask LLM to summarize the findings
+
+                self.log_sender.send((
+                    String::from("I am looking at `nmap_report.xml` file... 👓"),
+                    String::from("Analyzing scan results...\n\nReading through the `nmap_report.xml` file.")
+                )).unwrap();
+
+                if let Ok(scan_data) = std::fs::read_to_string("nmap_report.xml") {
+                    match self.chat_tool.run(vec![format!(
+                        "Please analyze this nmap scan result and provide security insights: {}",
+                        scan_data
+                    )]) {
+                        Ok(ToolResult::Success(analysis)) => {
+                            self.log_sender.send((
+                                String::from("I have something for you... 📄"),
+                                analysis
+                            )).unwrap();
+                        }
+                        Ok(ToolResult::Error(err)) => {
+                            self.log_sender.send((
+                                String::from("Forgive me for I have failed (1) ⛔"),
+                                err
+                            )).unwrap();
+                        }
+                        Err(e) => {
+                            self.log_sender.send((
+                                String::from("Forgive me for I have failed (2) ⛔"),
+                                e.to_string()
+                            )).unwrap();
+                        }
+                    }
+                }
+            }
+            Ok(ToolResult::Error(err)) => {
+                self.log_sender.send((
+                    String::from("Scan failed"),
+                    err
+                )).unwrap();
+            }
+            Err(e) => {
+                self.log_sender.send((
+                    String::from("Error during scan"),
+                    e.to_string()
+                )).unwrap();
+            }
+        }
+
+        self.set_state(AgentState::Idle);
     }
 
     fn handle_message(&mut self, msg: AgentMessage) {
@@ -83,7 +168,7 @@ impl Agent {
             AgentMessage::SetHost(host) => {
                 self.set_host(host);
                 self.log_sender.send((
-                    format!("Now looking at host: {}", self.get_host()),
+                    format!("Now looking 🔍 at host: {}", self.config.host),
                     format!("Host changed to {}", self.get_host())
                 )).unwrap();
                 self.poke();
@@ -224,7 +309,7 @@ fn main() -> Result<(), io::Error> {
     let mut app = App::new();
 
     app.log.add(
-        String::from("Welcome!"),
+        String::from("Welcome! 👋🏼"),
         String::from("The default host has been set to 127.0.0.1"),
     );
 
@@ -234,7 +319,7 @@ fn main() -> Result<(), io::Error> {
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-
+    
     terminal.clear()?;
     
     loop {
