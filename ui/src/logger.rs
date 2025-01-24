@@ -1,5 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Utc, TimeZone};
+use ratatui::widgets::ListState;
 
 #[derive(Clone)]
 pub struct LogEntry {
@@ -11,12 +12,14 @@ pub struct LogEntry {
 
 pub struct Logger {
     logs: Vec<LogEntry>,
+    selected: Option<usize>,
 }
 
 impl Logger {
     pub fn new() -> Self {
         Logger {
             logs: Vec::new(),
+            selected: None,
         }
     }
 
@@ -48,5 +51,13 @@ impl Logger {
 
     pub fn get_logs(&self) -> &Vec<LogEntry> {
         &self.logs
+    }
+
+    pub fn get_selected(&self) -> Option<usize> {
+        self.selected
+    }
+
+    pub fn select(&mut self, index: Option<usize>) {
+        self.selected = index;
     }
 }

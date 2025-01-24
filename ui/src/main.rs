@@ -14,31 +14,42 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use chrono::{DateTime, Utc, TimeZone};
+use crossbeam_channel::{unbounded, Sender, Receiver};
 
 use crate::logger::Logger;
 
+#[derive(Debug, Clone)]
+enum AgentMessage {
+    Poke,
+    SetHost(String),
+}
+
+#[derive(Debug, Clone)]
 enum AgentState {
     Idle,
     Thinking,
-    Working,
 }
 
+#[derive(Debug, Clone)]
 struct AgentConfig {
     host: String,
 }
 
+#[derive(Debug, Clone)]
 struct Agent {
-    state: AgentState,
     config: AgentConfig,
+    state: AgentState,
+    log_sender: Sender<(String, String)>,
 }
 
 impl Agent {
-    fn new() -> Self {
-        Self {
-            state: AgentState::Idle,
+    fn new(log_sender: Sender<(String, String)>) -> Self {
+        Agent {
             config: AgentConfig {
                 host: String::from("127.0.0.1"),
             },
+            state: AgentState::Idle,
+            log_sender,
         }
     }
 
@@ -60,6 +71,24 @@ impl Agent {
 
     fn poke(&mut self) {
         self.set_state(AgentState::Thinking);
+        self.log_sender.send((
+            String::from("Agent Status"),
+            String::from("Agent is thinking..."),
+        )).unwrap();
+    }
+
+    fn handle_message(&mut self, msg: AgentMessage) {
+        match msg {
+            AgentMessage::Poke => self.poke(),
+            AgentMessage::SetHost(host) => {
+                self.set_host(host);
+                self.log_sender.send((
+                    format!("Now looking at host: {}", self.get_host()),
+                    format!("Host changed to {}", self.get_host())
+                )).unwrap();
+                self.poke();
+            }
+        }
     }
 }
 
@@ -87,6 +116,7 @@ impl Commands {
         commands.insert("sethost".to_string(), "Set host".to_string());
         commands.insert("help".to_string(), "Available commands: hello, quit, sethost".to_string());
         commands.insert("quit".to_string(), "Goodbye!".to_string());
+        commands.insert("poke".to_string(), "Poke the agent".to_string());
         commands
     }
 
@@ -121,20 +151,36 @@ struct App {
     agent: Agent,
     commands: Commands,
     log: Logger,
-    log_state: ListState,
+    agent_sender: Sender<AgentMessage>,
+    log_receiver: Receiver<(String, String)>,
 }
 
 impl App {
     fn new() -> Self {
-        let mut log_state = ListState::default();
-        log_state.select(Some(0));
-        Self {
+        let (agent_sender, agent_receiver) = unbounded();
+        let (log_sender, log_receiver) = unbounded();
+        
+        let mut app = App {
             input: String::new(),
-            agent: Agent::new(),
+            agent: Agent::new(log_sender.clone()),
             commands: Commands::new(),
             log: Logger::new(),
-            log_state,
-        }
+            agent_sender,
+            log_receiver,
+        };
+
+        // Spawn a thread to handle agent messages
+        std::thread::spawn({
+            let mut agent = app.agent.clone();
+            let receiver = agent_receiver;
+            move || {
+                while let Ok(msg) = receiver.recv() {
+                    agent.handle_message(msg);
+                }
+            }
+        });
+
+        app
     }
 
     fn next_log(&mut self) {
@@ -142,7 +188,7 @@ impl App {
         if logs.is_empty() {
             return;
         }
-        let i = match self.log_state.selected() {
+        let i = match self.log.get_selected() {
             Some(i) => {
                 if i >= logs.len() - 1 {
                     0
@@ -152,7 +198,7 @@ impl App {
             }
             None => 0,
         };
-        self.log_state.select(Some(i));
+        self.log.select(Some(i));
     }
 
     fn previous_log(&mut self) {
@@ -160,7 +206,7 @@ impl App {
         if logs.is_empty() {
             return;
         }
-        let i = match self.log_state.selected() {
+        let i = match self.log.get_selected() {
             Some(i) => {
                 if i == 0 {
                     logs.len() - 1
@@ -170,7 +216,7 @@ impl App {
             }
             None => 0,
         };
-        self.log_state.select(Some(i));
+        self.log.select(Some(i));
     }
 }
 
@@ -215,7 +261,10 @@ fn main() -> Result<(), io::Error> {
                 .highlight_style(Style::default().add_modifier(Modifier::BOLD))
                 .highlight_symbol("> ");
 
-            let details_content = if let Some(selected) = app.log_state.selected() {
+            let mut list_state = ListState::default();
+            list_state.select(app.log.get_selected());
+
+            let details_content = if let Some(selected) = app.log.get_selected() {
                 if let Some(entry) = logs.get(selected) {
                     format!("Time: {}\nSummary: {}\n\nDetails:\n{}", 
                         Utc.timestamp_opt(entry.created_at as i64, 0).unwrap().format("%Y-%m-%d %H:%M:%S"),
@@ -236,7 +285,7 @@ fn main() -> Result<(), io::Error> {
                 .constraints([Constraint::Percentage(40), Constraint::Percentage(60)].as_ref())
                 .split(chunks[2]);
 
-            f.render_stateful_widget(log_list, log_chunks[0], &mut app.log_state);
+            f.render_stateful_widget(log_list, log_chunks[0], &mut list_state);
             f.render_widget(log_details_widget, log_chunks[1]);
 
             let settings = format!("Target host: {}", app.agent.get_host());
@@ -249,6 +298,11 @@ fn main() -> Result<(), io::Error> {
             f.render_widget(input_widget, chunks[0]);
         })?;
 
+        // Check for any new log messages
+        while let Ok((summary, details)) = app.log_receiver.try_recv() {
+            app.log.add(summary, details);
+        }
+
         // Handle input
         if crossterm::event::poll(std::time::Duration::from_millis(500))? {
             if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
@@ -258,13 +312,11 @@ fn main() -> Result<(), io::Error> {
                         // Execute command on Enter key
                         match app.commands.get_current_command().as_str() {
                             "sethost" => {
-                                app.agent.set_host(app.commands.get_current_command_args()[0].clone());
-                                app.log.add(
-                                    format!("Now looking at host: {}", app.agent.get_host()),
-                                    format!("Host changed to {}", app.agent.get_host())
-                                );
-
-                                app.agent.poke();
+                                let host = app.commands.get_current_command_args()[0].clone();
+                                app.agent_sender.send(AgentMessage::SetHost(host)).unwrap();
+                            },
+                            "poke" => {
+                                app.agent_sender.send(AgentMessage::Poke).unwrap();
                             },
                             "exit" => break,
                             _ => {}
