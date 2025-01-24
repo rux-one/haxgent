@@ -14,7 +14,11 @@ Current requirements:
 
 I am using a NixOS shell (with Deno installed) but the packages are available on any system probably.
 
-`nix-shell -p rustscan nmap-formatter glow`
+`nix-shell -p rustscan nmap-formatter glow pkg-config openssl`
 
 ### Changelog
+- 0.3.1 - Added some emojis to the Log output (critical change)
+- 0.3.0 - Added tool to use ChatGPT (rewritten ChatService from TS)
+- 0.2.0 - Added tool to use system command (hardcoded to Rustscan)
+- 0.1.0 - Started rewriting from TS to Rust (was not able to easily build TUI with TypeScript)
 - 0.0.1 - Initial script which does a basic scan sequentially (hardcoded to `localhost`)
