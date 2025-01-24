@@ -45,4 +45,8 @@ impl Logger {
             .collect::<Vec<String>>()
             .join("\n")
     }
+
+    pub fn get_logs(&self) -> &Vec<LogEntry> {
+        &self.logs
+    }
 }
