@@ -1,3 +1,5 @@
+mod logger;
+
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Layout},
@@ -10,6 +12,8 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+
+use crate::logger::Logger;
 
 enum AgentState {
     Idle,
@@ -107,9 +111,13 @@ impl Commands {
 }
 
 
+
+
 fn main() -> Result<(), io::Error> {
     let mut commands = Commands::new();
     let mut agent = Agent::new();
+
+    let mut log: Logger = Logger::new();
 
     // Setup terminal
     enable_raw_mode()?;
@@ -126,23 +134,23 @@ fn main() -> Result<(), io::Error> {
         terminal.draw(|f| {
             let size = f.size();
             let chunks = Layout::default()
-                .constraints([Constraint::Percentage(60), Constraint::Percentage(30), Constraint::Percentage(10)].as_ref())
+                .constraints([Constraint::Max(3), Constraint::Max(5), Constraint::Max(1)].as_ref())
                 .split(size);
 
             // Display command output
             commands.capture_command(&input);
-            let output_widget = Paragraph::new("Foo")
-                .block(Block::default().borders(Borders::ALL).title("Output"));
-            f.render_widget(output_widget, chunks[0]);
+            let output_widget = Paragraph::new(log.format_logs())
+                .block(Block::default().borders(Borders::ALL).title(" -- log --"));
+            f.render_widget(output_widget, chunks[2]);
 
-            let status = format!("Target host: {}", agent.get_host());
-            let status_widget = Paragraph::new(status)
-                .block(Block::default().borders(Borders::ALL).title("Status"));
-            f.render_widget(status_widget, chunks[1]);
+            let settings = format!("Target host: {}", agent.get_host());
+            let settings_widget = Paragraph::new(settings)
+                .block(Block::default().borders(Borders::ALL).title(" -- settings -- "));
+            f.render_widget(settings_widget, chunks[1]);
             // Input area
             let input_widget = Paragraph::new(input.as_ref() as &str)
-                .block(Block::default().borders(Borders::ALL).title("Input"));
-            f.render_widget(input_widget, chunks[2]);
+                .block(Block::default().borders(Borders::ALL).title(" -- command --"));
+            f.render_widget(input_widget, chunks[0]);
         })?;
 
         // Handle input
@@ -153,12 +161,18 @@ fn main() -> Result<(), io::Error> {
                         // Execute command on Enter key
 
                         match commands.get_current_command().as_str() {
-                            "sethost" => agent.set_host(commands.get_current_command_args()[0].clone()),
+                            "sethost" => {
+                                agent.set_host(commands.get_current_command_args()[0].clone());
+                                log.add(
+                                    format!("Set host to {}", agent.get_host()),
+                                    format!("Host changed to {}", agent.get_host())
+                                );
+                            },
                             "exit" => break,
                             _ => {}
                         }
 
-                        input.clear();  // Cleaesponser input after execution
+                        input.clear();  // Clear input after execution
                     }
                     crossterm::event::KeyCode::Esc => break,  // Exit on Esc key
                     crossterm::event::KeyCode::Char(c) => {
