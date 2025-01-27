@@ -25,6 +25,7 @@ I am using a NixOS shell (with Rust pre-installed) but the packages are availabl
 `nix-shell -p rustscan nmap-formatter glow pkg-config openssl`
 
 ### Changelog
+- 0.3.2 - Added analogous Ollama service for local models 
 - 0.3.1 - Added some emojis to the Log output (critical change)
 - 0.3.0 - Added tool to use ChatGPT (rewritten ChatService from TS)
 - 0.2.0 - Added tool to use system command (hardcoded to Rustscan)
