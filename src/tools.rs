@@ -1,6 +1,6 @@
 use std::process::Command;
 use anyhow::Result;
-use chat_rust::{ChatService, OpenAiChatService, Role};
+use chat_rust::{ChatService, OpenAiChatService, OllamaChatService, Role};
 use dotenv::dotenv;
 use tokio;
 
@@ -87,7 +87,7 @@ impl Tool for ChatTool {
                 Err(_) => return Ok(ToolResult::Error("OPENAI_API_KEY not found in .env file".to_string())),
             };
 
-            let mut chat_service = OpenAiChatService::new(api_key, None, None);
+            let mut chat_service = OllamaChatService::new(None, None);
             
             chat_service.set_system_message(
                 "You are a cybersecurity expert. 

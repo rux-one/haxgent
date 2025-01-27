@@ -1,4 +1,6 @@
 use async_trait::async_trait;
+use futures_util::StreamExt;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 
@@ -148,6 +150,131 @@ impl ChatService for OpenAiChatService {
     ) -> Result<String, Box<dyn Error>> {
         // TODO: Implement image support
         Ok(String::new())
+    }
+
+    fn set_system_message(&mut self, message: String) {
+        self.base.set_system_message(message);
+    }
+
+    fn add_message(&mut self, content: String, role: Role) {
+        self.base.add_message(content, role);
+    }
+
+    fn clear_history(&mut self, keep_system_message: bool) {
+        self.base.clear_history(keep_system_message);
+    }
+
+    fn get_chat_history(&self) -> &[Message] {
+        self.base.get_chat_history()
+    }
+}
+
+pub const OLLAMA_DEFAULT_BASE: &str = "http://localhost:11434";
+pub const OLLAMA_DEFAULT_MODEL: &str = "llama3:8b";
+
+#[derive(Debug, Serialize)]
+struct OllamaRequest {
+    model: String,
+    messages: Vec<Message>,
+    keep_alive: i32,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaStreamResponse {
+    message: Option<Message>,
+}
+
+pub struct OllamaChatService {
+    base: BaseChatMessage,
+    base_url: String,
+}
+
+impl OllamaChatService {
+    pub fn new(
+        model: Option<String>,
+        base_url: Option<String>,
+    ) -> Self {
+        Self {
+            base: BaseChatMessage::new(model.unwrap_or_else(|| OLLAMA_DEFAULT_MODEL.to_string())),
+            base_url: base_url.unwrap_or_else(|| OLLAMA_DEFAULT_BASE.to_string()),
+        }
+    }
+
+    async fn process_stream_response(response: reqwest::Response) -> Result<String, Box<dyn Error>> {
+        let mut result = String::new();
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            let text = String::from_utf8_lossy(&chunk);
+            
+            for line in text.lines() {
+                if line.is_empty() {
+                    continue;
+                }
+                
+                if let Ok(response) = serde_json::from_str::<OllamaStreamResponse>(line) {
+                    if let Some(message) = response.message {
+                        result.push_str(&message.content);
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+#[async_trait]
+impl ChatService for OllamaChatService {
+    async fn send_message(&mut self, content: String, role: Role) -> Result<String, Box<dyn Error>> {
+        self.base.add_message(content, role);
+
+        let client = reqwest::Client::new();
+        let request = OllamaRequest {
+            model: self.base.model.clone(),
+            messages: self.base.messages.clone(),
+            keep_alive: 0,
+        };
+
+        let response = client
+            .post(format!("{}/api/chat", self.base_url))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await?;
+
+        Self::process_stream_response(response).await
+    }
+
+    async fn send_message_with_images(
+        &mut self,
+        message: String,
+        images: Vec<String>,
+        role: Role,
+    ) -> Result<String, Box<dyn Error>> {
+        self.add_message(message, role);
+        
+        // Update the last message to include images
+        if let Some(last_message) = self.base.messages.last_mut() {
+            last_message.images = Some(images);
+        }
+
+        let client = reqwest::Client::new();
+        let request = OllamaRequest {
+            model: self.base.model.clone(),
+            messages: self.base.messages.clone(),
+            keep_alive: 0,
+        };
+
+        let response = client
+            .post(format!("{}/api/chat", self.base_url))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await?;
+
+        Self::process_stream_response(response).await
     }
 
     fn set_system_message(&mut self, message: String) {
